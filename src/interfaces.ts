@@ -4,11 +4,12 @@ export interface NBXClientOpts {
   derivationScheme?: string;
   address?: string;
   cookieFilePath?: string;
+  token?: string;
 }
 
 export interface BasicAuth {
-  user: string;
-  pass: string;
+  username: string;
+  password: string;
 }
 
 export interface TrackDerivationSchemeArg {

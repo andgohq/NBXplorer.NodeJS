@@ -5,7 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 // import * as qs from 'querystring';
 import { RegtestUtils } from 'regtest-client';
-import * as rp from 'request-promise-native';
+import axios from 'axios';
 import { NBXClient } from './index';
 import { GetTransactionsResponse } from './interfaces';
 
@@ -19,11 +19,11 @@ const COOKIE_FILE = path.join(TEMP_FOLDER, '.cookie');
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve): any => setTimeout(resolve, ms));
 const getCookie = (): Promise<void> =>
-  (rp(APIURL_C + '/cookie').then((text: string) => {
+  (axios(APIURL_C + '/cookie', { responseType: 'text' }).then(res => res.data).then((text: string) => {
     fs.writeFileSync(COOKIE_FILE, text, 'utf8');
   }) as unknown) as Promise<void>;
 const resetNBX = async ({ noauth }: { noauth: boolean }): Promise<void> => {
-  await rp(APIURL_C + '/resetNBX' + (noauth ? '?noauth=1' : ''));
+  await axios(APIURL_C + '/resetNBX' + (noauth ? '?noauth=1' : ''));
 };
 const hasAuth = async (): Promise<boolean> => {
   const cli = new NBXClient({

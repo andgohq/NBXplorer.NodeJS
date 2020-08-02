@@ -1,6 +1,5 @@
 import * as fs from 'fs';
-import * as qs from 'querystring';
-import * as rp from 'request-promise-native';
+import axios from 'axios';
 import {
   BasicAuth,
   BroadcastTxResponse,
@@ -44,8 +43,9 @@ export class NBXClient {
   address?: string;
   instanceName?: string;
   private cookieFilePath?: string;
+  private token?: string;
 
-  constructor(opts: NBXClientOpts) {
+  constructor(opts: NBXClientOpts & { token?: string }) {
     if (!opts.uri || !opts.cryptoCode) {
       throw new Error(
         'Must contain uri (ex. https://nbx.mydomain.com ) and cryptoCode (ex. btc )',
@@ -69,16 +69,19 @@ export class NBXClient {
     }
     if (opts.address) this.address = opts.address;
     if (opts.cookieFilePath) this.cookieFilePath = opts.cookieFilePath;
+    if (opts.token) this.token = opts.token;
   }
 
   private get auth(): BasicAuth | undefined {
     if (this.cookieFilePath === undefined) return;
-    const text = fs.readFileSync(this.cookieFilePath, 'utf8');
-    const [user, pass] = text.split(':');
-    return {
-      user,
-      pass,
-    };
+    if (this.cookieFilePath) {
+      const text = fs.readFileSync(this.cookieFilePath, 'utf8');
+      const [username, password] = text.split(':');
+      return {
+        username,
+        password,
+      };
+    }
   }
 
   private get hasWallet(): boolean {
@@ -103,7 +106,7 @@ export class NBXClient {
       ? this.uri + `/v1/cryptos/${this.cryptoCode}/addresses/${this.address}`
       : this.uri +
         `/v1/cryptos/${this.cryptoCode}/derivations/${this.derivationScheme}`;
-    return this.makePost(url, true, this.auth, trackDerivationSchemeArg);
+    return this.makePost(url, this.auth, trackDerivationSchemeArg || {});
   }
 
   async getTransactions(
@@ -117,7 +120,7 @@ export class NBXClient {
         `/v1/cryptos/${this.cryptoCode}/derivations/${this.derivationScheme}/transactions`;
     const query =
       includeTransaction !== undefined ? { includeTransaction } : undefined;
-    return this.makeGet(url, true, this.auth, query);
+    return this.makeGet(url, this.auth, query);
   }
 
   async getTransaction(
@@ -132,7 +135,7 @@ export class NBXClient {
         `/v1/cryptos/${this.cryptoCode}/derivations/${this.derivationScheme}/transactions/${txid}`;
     const query =
       includeTransaction !== undefined ? { includeTransaction } : undefined;
-    return this.makeGet(url, true, this.auth, query);
+    return this.makeGet(url, this.auth, query);
   }
 
   async getBalance(): Promise<GetBalanceResponse> {
@@ -142,7 +145,7 @@ export class NBXClient {
         `/v1/cryptos/${this.cryptoCode}/addresses/${this.address}/balance`
       : this.uri +
         `/v1/cryptos/${this.cryptoCode}/derivations/${this.derivationScheme}/balance`;
-    return this.makeGet(url, true, this.auth);
+    return this.makeGet(url, this.auth);
   }
 
   async getTransactionNoWallet(
@@ -153,12 +156,12 @@ export class NBXClient {
       this.uri + `/v1/cryptos/${this.cryptoCode}/transactions/${txid}`;
     const query =
       includeTransaction !== undefined ? { includeTransaction } : undefined;
-    return this.makeGet(url, true, this.auth, query);
+    return this.makeGet(url, this.auth, query);
   }
 
   async getStatus(): Promise<GetStatusResponse> {
     const url = this.uri + `/v1/cryptos/${this.cryptoCode}/status`;
-    return this.makeGet(url, true, this.auth);
+    return this.makeGet(url, this.auth);
   }
 
   async getAddress(opts?: GetAddressArgs): Promise<GetAddressResponse> {
@@ -166,7 +169,7 @@ export class NBXClient {
     const url =
       this.uri +
       `/v1/cryptos/${this.cryptoCode}/derivations/${this.derivationScheme}/addresses/unused`;
-    return this.makeGet(url, true, this.auth, opts);
+    return this.makeGet(url, this.auth, opts);
   }
 
   async getExtPubKeyFromScript(
@@ -176,7 +179,7 @@ export class NBXClient {
     const url =
       this.uri +
       `/v1/cryptos/${this.cryptoCode}/derivations/${this.derivationScheme}/scripts/${script}`;
-    return this.makeGet(url, true, this.auth);
+    return this.makeGet(url, this.auth);
   }
 
   async getUtxos(): Promise<GetUtxosResponse> {
@@ -186,7 +189,7 @@ export class NBXClient {
         `/v1/cryptos/${this.cryptoCode}/addresses/${this.address}/utxos`
       : this.uri +
         `/v1/cryptos/${this.cryptoCode}/derivations/${this.derivationScheme}/utxos`;
-    return this.makeGet(url, true, this.auth);
+    return this.makeGet(url, this.auth);
   }
 
   async broadcastTx(
@@ -196,9 +199,9 @@ export class NBXClient {
     const url = this.uri + `/v1/cryptos/${this.cryptoCode}/transactions`;
     const query =
       testMempoolAccept === true ? { testMempoolAccept: true } : undefined;
-    return this.makePost(url, false, this.auth, tx, query)
-      .then(JSON.parse)
-      .then((res: BroadcastTxResponse) => {
+    return this.makePost(url, this.auth, tx, query, {
+      'Content-Type': 'application/octet-stream'
+    }).then((res: BroadcastTxResponse) => {
         if (res.success === true) {
           return res;
         }
@@ -211,12 +214,12 @@ export class NBXClient {
 
   async rescanTx(transactions: RescanTxArgs[]): Promise<void> {
     const url = this.uri + `/v1/cryptos/${this.cryptoCode}/rescan`;
-    return this.makePost(url, true, this.auth, { transactions });
+    return this.makePost(url, this.auth, { transactions });
   }
 
   async getFeeRate(blockCount: number): Promise<GetFeeRateResponse> {
     const url = this.uri + `/v1/cryptos/${this.cryptoCode}/fees/${blockCount}`;
-    return this.makeGet(url, true, this.auth);
+    return this.makeGet(url, this.auth);
   }
 
   async scanWallet(opts?: ScanWalletArgs): Promise<void> {
@@ -224,7 +227,7 @@ export class NBXClient {
     const url =
       this.uri +
       `/v1/cryptos/${this.cryptoCode}/derivations/${this.derivationScheme}/utxos/scan`;
-    return this.makePost(url, true, this.auth, undefined, opts);
+    return this.makePost(url, this.auth, undefined, opts);
   }
 
   async getScanStatus(): Promise<GetScanStatusResponse> {
@@ -232,17 +235,17 @@ export class NBXClient {
     const url =
       this.uri +
       `/v1/cryptos/${this.cryptoCode}/derivations/${this.derivationScheme}/utxos/scan`;
-    return this.makeGet(url, true, this.auth);
+    return this.makeGet(url, this.auth);
   }
 
   async getEvents(opts?: GetEventsArgs): Promise<Event[]> {
     const url = this.uri + `/v1/cryptos/${this.cryptoCode}/events`;
-    return this.makeGet(url, true, this.auth, opts);
+    return this.makeGet(url, this.auth, opts);
   }
 
   async getLatestEvents(opts?: GetLatestEventsArgs): Promise<Event[]> {
     const url = this.uri + `/v1/cryptos/${this.cryptoCode}/events/latest`;
-    return this.makeGet(url, true, this.auth, opts);
+    return this.makeGet(url, this.auth, opts);
   }
 
   async createPsbt(opts: CreatePsbtArgs): Promise<CreatePsbtResponse> {
@@ -250,7 +253,7 @@ export class NBXClient {
     const url =
       this.uri +
       `/v1/cryptos/${this.cryptoCode}/derivations/${this.derivationScheme}/psbt/create`;
-    return this.makePost(url, true, this.auth, opts);
+    return this.makePost(url, this.auth, opts);
   }
 
   async updatePsbt(opts: UpdatePsbtArgs): Promise<UpdatePsbtResponse> {
@@ -258,7 +261,7 @@ export class NBXClient {
     if (opts && !opts.derivationScheme && this.derivationScheme) {
       opts.derivationScheme = this.derivationScheme;
     }
-    return this.makePost(url, true, this.auth, opts);
+    return this.makePost(url, this.auth, opts);
   }
 
   async addMeta(key: string, value: any): Promise<void> {
@@ -266,7 +269,7 @@ export class NBXClient {
     const url =
       this.uri +
       `/v1/cryptos/${this.cryptoCode}/derivations/${this.derivationScheme}/metadata/${key}`;
-    return this.makePost(url, true, this.auth, { [key]: value });
+    return this.makePost(url, this.auth, { [key]: value });
   }
 
   async removeMeta(key: string): Promise<void> {
@@ -274,7 +277,7 @@ export class NBXClient {
     const url =
       this.uri +
       `/v1/cryptos/${this.cryptoCode}/derivations/${this.derivationScheme}/metadata/${key}`;
-    return this.makePost(url, true, this.auth);
+    return this.makePost(url, this.auth);
   }
 
   /**
@@ -287,7 +290,7 @@ export class NBXClient {
     const url =
       this.uri +
       `/v1/cryptos/${this.cryptoCode}/derivations/${this.derivationScheme}/metadata/${key}`;
-    return this.makeGet(url, true, this.auth);
+    return this.makeGet(url, this.auth);
   }
 
   async prune(opts?: PruneArgs): Promise<PruneResponse> {
@@ -295,7 +298,7 @@ export class NBXClient {
     const url =
       this.uri +
       `/v1/cryptos/${this.cryptoCode}/derivations/${this.derivationScheme}/prune`;
-    return this.makePost(url, true, this.auth, opts);
+    return this.makePost(url, this.auth, opts);
   }
 
   async generateWallet(
@@ -304,7 +307,6 @@ export class NBXClient {
     const url = this.uri + `/v1/cryptos/${this.cryptoCode}/derivations`;
     const resp: GenerateWalletResponse = await this.makePost(
       url,
-      true,
       this.auth,
       opts,
     );
@@ -323,14 +325,14 @@ export class NBXClient {
     opts: RpcProxyArgs | RpcProxyArgs[],
   ): Promise<RpcProxyResponse | RpcProxyResponse[]> {
     const url = this.uri + `/v1/cryptos/${this.cryptoCode}/rpc`;
-    return this.makePost(url, true, this.auth, opts, {
+    return this.makePost(url, this.auth, opts, {
       'Content-Type': 'application/json',
     });
   }
 
   async healthCheck(): Promise<HealthCheckResponse> {
     const url = this.uri + `/health`;
-    return this.makeGet(url, true, undefined);
+    return this.makeGet(url, undefined);
   }
 
   private checkWallet(): void {
@@ -345,51 +347,26 @@ export class NBXClient {
 
   private async makeGet(
     uri: string,
-    json: boolean,
     auth?: BasicAuth,
     query?: any,
     headers?: any,
   ): Promise<any> {
-    const opts: any = {
-      method: 'GET',
-      uri: !query ? uri : uri + '?' + qs.stringify(query),
-      auth,
-      json,
-      headers,
-      transform: INCLUDE_HEADERS,
-    };
-    return ((rp(opts) as unknown) as Promise<any>).then(resp => {
-      if (!this.instanceName) this.instanceName = resp.headers['instance-name'];
+    return axios.get(uri, { auth, params: query, headers: Object.assign(this.token ? { Authorization: `Basic ${this.token}` } : {}, headers) }).then(resp => {
       return resp.data;
     });
   }
 
   private async makePost(
     uri: string,
-    json: boolean,
     auth?: BasicAuth,
     body?: any,
     query?: any,
     headers?: any,
   ): Promise<any> {
-    const opts: any = {
-      method: 'POST',
-      uri: !query ? uri : uri + '?' + qs.stringify(query),
-      auth,
-      body,
-      json,
-      headers,
-      transform: INCLUDE_HEADERS,
-    };
-    return ((rp(opts) as unknown) as Promise<any>).then(resp => {
-      if (!this.instanceName) this.instanceName = resp.headers['instance-name'];
+    return axios.post(uri, body, { auth, params: query,　headers: Object.assign(this.token ? { Authorization: `Basic ${this.token}` } : {}, headers) }).then(resp => {
       return resp.data;
     });
   }
 }
-
-const INCLUDE_HEADERS = (body: any, response: any): any => {
-  return { headers: response.headers, data: body };
-};
 
 export * from './interfaces';
